@@ -64,15 +64,15 @@ ToggleAutoPress(*)
 
     if ScriptRunning
     {
-        SetTimer(PressT, 1000)
-        SetTimer(PressC, 500)
+        ;SetTimer(PressT, 2500)
+        SetTimer(PressC, 150)
         StartStopBtn.Text := "⏸ 暂停"
         StatusText.Text := "● 运行中"
         StatusText.Opt("cLime")
     }
     else
     {
-        SetTimer(PressT, 0)
+        ;SetTimer(PressT, 0)
         SetTimer(PressC, 0)
         StartStopBtn.Text := "▶ 启动"
         StatusText.Text := "● 已停止"

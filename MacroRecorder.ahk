@@ -1,0 +1,532 @@
+#Requires AutoHotkey v2.0+
+;#NoTrayIcon
+#SingleInstance Off
+Thread("NoTimers")
+CoordMode("ToolTip")
+SetTitleMatchMode(2)
+DetectHiddenWindows(true)
+;-----------------------------------
+;  Macro Recorder v3.7 by Arty McLabin
+;  Based on v2 by Raeleus (https://github.com/raeleus/AHK-Macro-Recorder). Raeleus based his on v2.1 of FeiYue
+;
+;  F1 = Play macro
+;  F2 = Record macro
+;  F3 = Edit macro in Notepad
+;  F4 = Toggle enable/disable script
+;  F6 = Play macro in a loop (F5 is commonly reserved by other apps, so F6 is the default - customize below)
+;
+;  To customize hotkeys, change the values below.
+;-----------------------------------
+
+DllCall("SetThreadDpiAwarenessContext", "ptr", -3, "ptr")  ; Fix mouse coords on scaled monitors (>100%)
+
+PLAY_KEY   := "F1"   ; Play macro
+RECORD_KEY := "F2"   ; Record macro
+EDIT_KEY   := "F3"   ; Edit macro in Notepad
+TOGGLE_KEY := "F4"   ; Toggle enable/disable script
+scriptEnabled := true  ; Start enabled by default
+LOOP_KEY   := "F6"   ; Play macro indefinitely (F5 is too commonly reserved by other apps)
+LOOP_DELAY := 1000   ; Delay in milliseconds between loops
+loopPID := 0  ; Track loop child process
+
+if (A_Args.Length < 1) {
+  A_Args.Push("~Record1.ahk")
+}
+
+if (A_Args.Length < 2) {
+  A_Args.Push("F1")
+}
+
+LogFile := A_Temp "\" A_Args[1]
+UpdateSettings
+Recording := false
+Playing := false
+ActionKey := A_Args[2]
+
+Hotkey(PLAY_KEY,   (*) => PlayKeyAction())
+Hotkey(RECORD_KEY, (*) => RecordKeyAction())
+Hotkey(EDIT_KEY,   (*) => EditKeyAction())
+Hotkey(LOOP_KEY,   (*) => LoopKeyAction())
+Hotkey(TOGGLE_KEY, (*) => ToggleScript())
+
+ReleaseModifiers() {
+  ; Release any physically held modifier keys to prevent them from
+  ; bleeding into macro playback (fixes issue with +F1, ^F1, !F1 hotkeys)
+  Send("{Shift up}{Ctrl up}{Alt up}{LWin up}{RWin up}")
+}
+
+StopLoop() {
+  global loopPID
+  if (!loopPID)
+    return false
+  try ProcessClose(loopPID)
+  loopPID := 0
+  ShowTip("LOOP Stopped", "y35", "Red|FF4444")
+  SetTimer(() => ShowTip(), -2000)
+  return true
+}
+
+ShowTip(s := "", pos := "y35", color := "Red|00FFFF") {
+  static bak := "", idx := 0, ShowTip := Gui(), RecordingControl
+  if (bak = color "," pos "," s)
+    return
+  bak := color "," pos "," s
+  SetTimer(ShowTip_ChangeColor, 0)
+  ShowTip.Destroy()
+  if (s = "")
+    return
+
+  ShowTip := Gui("+LastFound +AlwaysOnTop +ToolWindow -Caption +E0x08000020", "ShowTip")
+  WinSetTransColor("FFFFF0 150")
+  ShowTip.BackColor := "cFFFFF0"
+  ShowTip.MarginX := 10
+  ShowTip.MarginY := 5
+  ShowTip.SetFont("q3 s20 bold cRed")
+  RecordingControl := ShowTip.Add("Text", , s)
+  ShowTip.Show("NA " . pos)
+  SetTimer(ShowTip_ChangeColor, 1000)
+
+  ShowTip_ChangeColor() {
+    r := StrSplit(SubStr(bak, 1, InStr(bak, ",") - 1), "|")
+    RecordingControl.SetFont("q3 c" r[idx := Mod(Round(idx), r.Length) + 1])
+    return
+  }
+}
+
+; Script starts silently — label only shown on user toggle (F4)
+
+;============ Hotkey =============
+
+RecordKeyAction() {
+  if (Recording) {
+    Stop()
+    return
+  }
+  StopLoop()
+  #SuspendExempt
+  RecordScreen()
+}
+
+RecordScreen() {
+  global LogArr := []
+  global oldid := ""
+  global Recording := false
+  global RelativeX, RelativeY
+
+  if (Recording || Playing)
+    return
+  UpdateSettings()
+  LogArr := []
+  oldid := ""
+  Log()
+  Recording := true
+  SetHotkey(1)
+  CoordMode("Mouse", "Screen")
+  MouseGetPos(&RelativeX, &RelativeY)
+  ShowTip("Recording")
+  return
+}
+
+UpdateSettings() {
+  global MouseMode, RecordSleep
+  if (FileExist(LogFile)) {
+    LogFileObject := FileOpen(LogFile, "r")
+
+    Loop 3 {
+      LogFileObject.ReadLine()
+    }
+    MouseMode := RegExReplace(LogFileObject.ReadLine(), ".*=")
+
+    LogFileObject.ReadLine()
+    RecordSleep := RegExReplace(LogFileObject.ReadLine(), ".*=")
+
+    LogFileObject.Close()
+  } else {
+    MouseMode := "screen"
+    RecordSleep := "false"
+  }
+
+  if (MouseMode != "screen" && MouseMode != "window" && MouseMode != "relative")
+    MouseMode := "screen"
+
+  if (RecordSleep != "true" && RecordSleep != "false")
+    RecordSleep := "false"
+}
+
+Stop() {
+  global LogArr, Recording, isPaused
+  #SuspendExempt
+  if (Recording) {
+    if (LogArr.Length > 0) {
+      UpdateSettings()
+      
+      ; Process LogArr to consolidate key combinations
+      ProcessKeySequences()
+
+      s := ";#####SETTINGS#####`n;What is the preferred method of recording mouse coordinates (screen,window,relative)`n;MouseMode=" MouseMode "`n;Record sleep between input actions (true,false)`n;RecordSleep=" RecordSleep "`n"
+      
+      s .= "try {`n"
+      s .= "isLoop := (A_Args.Has(1) && A_Args[1] == `"loop`")`n"
+      s .= "while (isLoop || A_Index == 1)`n{`n`n"
+      
+      s .= "StartingValue := 0`ni := RegRead(`"HKEY_CURRENT_USER\SOFTWARE\`" A_ScriptName, `"i`", StartingValue)`nRegWrite(i + 1, `"REG_DWORD`", `"HKEY_CURRENT_USER\SOFTWARE\`" A_ScriptName, `"i`")`n`nSetKeyDelay(30)`nSendMode(`"Event`")`nSetTitleMatchMode(2)"
+
+      if (MouseMode == "window") {
+        s .= "`n;CoordMode(`"Mouse`", `"Screen`")`nCoordMode(`"Mouse`", `"Window`")`n"
+      } else {
+        s .= "`nCoordMode(`"Mouse`", `"Screen`")`n;CoordMode(`"Mouse`", `"Window`")`n"
+      }
+
+      For k, v in LogArr
+        s .= "    " v "`n"
+      
+      s .= "    if (isLoop)`n"
+      s .= "        Sleep(" LOOP_DELAY ")`n"
+      
+      s .= "}`n"
+      s .= "} finally {`n"
+      s .= "  BlockInput(false)`n"
+      s .= "}`n"
+      s .= "ExitApp()`n`n" ActionKey "::ExitApp()`n" LOOP_KEY "::ExitApp()"
+      
+      s := RegExReplace(s, "\R", "`n")
+      if (FileExist(LogFile))
+        FileDelete(LogFile)
+      FileAppend(s, LogFile, "UTF-16")
+      s := ""
+    }
+    Recording := 0
+    LogArr := ""
+    SetHotkey(0)
+  }
+
+  ShowTip()
+  Suspend(false)
+  Pause(false)
+  isPaused := false
+  return
+}
+
+LoopKeyAction() {
+  global loopPID
+  #SuspendExempt
+
+  ; If loop is running, stop it
+  if (StopLoop())
+    return
+
+  if (Recording || Playing)
+    Stop()
+  ahk := A_AhkPath
+  if (!FileExist(ahk))
+  {
+    MsgBox("Can't Find " ahk " !", "Error", 4096)
+    Exit()
+  }
+
+  EnsureEmptyMacroFile()
+
+  ReleaseModifiers()
+  if (A_IsCompiled) {
+    Run(ahk " /script /restart `"" LogFile "`" loop", , , &pid)
+  } else {
+    Run(ahk " /restart `"" LogFile "`" loop", , , &pid)
+  }
+  loopPID := pid
+  ShowTip("LOOP Started", "y35", "Green|00FF00")
+  SetTimer(() => ShowTip(), -2000)
+  return
+}
+
+; Helper function to process key sequences and consolidate key combinations
+ProcessKeySequences() {
+  global LogArr
+  newLogArr := []
+  
+  i := 1
+  while (i <= LogArr.Length) {
+    currentLine := LogArr[i]
+    
+    ; Look for patterns like "Send("{Alt Down}")" followed by "Send("{Something}")" and then "Send("{Alt Up}")"
+    if (i + 2 <= LogArr.Length) {
+      modDown := RegExMatch(currentLine, 'Send\("{([^}]+) Down}"\)')
+      if (modDown) {
+        modifier := RegExReplace(currentLine, 'Send\("{([^}]+) Down}"\)', "$1")
+        nextLine := LogArr[i + 1]
+        upLine := LogArr[i + 2]
+        
+        ; Check if this is a modifier + key + modifier up pattern
+        if (RegExMatch(upLine, 'Send\("{' modifier ' Up}"\)')) {
+          ; This is a modifier key combination
+          if (RegExMatch(nextLine, 'Send\("{Blind}([^}]*)"\)')) {
+            key := RegExReplace(nextLine, 'Send\("{Blind}([^}]*)"\)', "$1")
+            ; Create a proper key combination
+            newLogArr.Push("Send(`"{" modifier " down}" key "{" modifier " up}`")")
+            i += 3  ; Skip the next two lines as we've processed them
+            continue
+          }
+        }
+      }
+    }
+    
+    ; Add the current line if it wasn't part of a key combination
+    newLogArr.Push(currentLine)
+    i++
+  }
+  
+  ; Replace the original LogArr with our processed version
+  LogArr := newLogArr
+}
+
+PlayKeyAction() {
+  #SuspendExempt
+  StopLoop()
+  if (Recording || Playing)
+    Stop()
+  ahk := A_AhkPath
+  if (!FileExist(ahk))
+  {
+    MsgBox("Can't Find " ahk " !", "Error", 4096)
+    Exit()
+  }
+
+  EnsureEmptyMacroFile()
+
+  ReleaseModifiers()
+  if (A_IsCompiled) {
+    Run(ahk " /script /restart `"" LogFile "`"")
+  } else {
+    Run(ahk " /restart `"" LogFile "`"")
+  }
+  return
+}
+
+EditKeyAction() {
+  #SuspendExempt
+  StopLoop()
+  EnsureEmptyMacroFile()
+  Run("notepad.exe `"" LogFile "`"")
+  return
+}
+
+ToggleScript() {
+    global scriptEnabled, PLAY_KEY, RECORD_KEY, EDIT_KEY
+    scriptEnabled := !scriptEnabled
+    if scriptEnabled {
+        Hotkey(PLAY_KEY,   "On")
+        Hotkey(RECORD_KEY, "On")
+        Hotkey(EDIT_KEY,   "On")
+        Hotkey(LOOP_KEY,   "On")
+        ShowTip("Macro Recorder ENABLED", "y35", "Green|00FF00")
+        SetTimer(() => ShowTip(), -500)
+    } else {
+        Hotkey(PLAY_KEY,   "Off")
+        Hotkey(RECORD_KEY, "Off")
+        Hotkey(EDIT_KEY,   "Off")
+        Hotkey(LOOP_KEY,   "Off")
+        ShowTip("Macro Recorder DISABLED", "y35", "Gray|888888")
+        SetTimer(() => ShowTip(), -500)
+    }
+}
+
+;============ Functions =============
+
+EnsureEmptyMacroFile() {
+  ; Create an empty macro file at LogFile if it doesn't exist yet.
+  ; SSoT for the empty-macro template (was duplicated 3x; AHK2 escape `n, not literal \n).
+  global LogFile
+  if (!FileExist(LogFile)) {
+    FileAppend("; Empty macro file created by script`nExitApp()`n", LogFile, "UTF-16")
+  }
+}
+
+SetHotkey(f := false) {
+  f := f ? "On" : "Off"
+  Loop 254
+  {
+    k := GetKeyName(vk := Format("vk{:X}", A_Index))
+    if (!(k ~= "^(?i:|Control|Alt|Shift)$"))
+      Hotkey("~*" vk, LogKey, f)
+  }
+  For i, k in StrSplit("NumpadEnter|Home|End|PgUp" . "|PgDn|Left|Right|Up|Down|Delete|Insert", "|")
+  {
+    sc := Format("sc{:03X}", GetKeySC(k))
+    if (!(k ~= "^(?i:|Control|Alt|Shift)$"))
+      Hotkey("~*" sc, LogKey, f)
+  }
+
+  if (f = "On") {
+    SetTimer(LogWindow)
+    LogWindow()
+  } else
+    SetTimer(LogWindow, 0)
+}
+
+LogKey(HotkeyName) {
+  Critical()
+  k := GetKeyName(vksc := SubStr(A_ThisHotkey, 3))
+  k := StrReplace(k, "Control", "Ctrl"), r := SubStr(k, 2)
+  if (r ~= "^(?i:Alt|Ctrl|Shift|Win)$")
+    LogKey_Control(k)
+  else if (k ~= "^(?i:LButton|RButton|MButton)$")
+    LogKey_Mouse(k)
+  else {
+    if (k = "NumpadLeft" || k = "NumpadRight") && !GetKeyState(k, "P")
+      return
+    k := StrLen(k) > 1 ? "{" k "}" : k ~= "\w" ? k : "{" vksc "}"
+    Log(k, 1)
+  }
+}
+
+LogKey_Control(key) {
+  global LogArr
+  static downKeys := Map()
+  originalKey := key  ; Store original before remapping
+  k := InStr(key, "Win") ? key : SubStr(key, 2)
+
+  ; Record the key as being pressed
+  downKeys[originalKey] := true
+
+  ; Log the key down event
+  Log("{" k " Down}", 1)
+
+  Critical("Off")
+  ErrorLevel := !KeyWait(key)
+  Critical()
+
+  ; Log the key up event
+  Log("{" k " Up}", 1)
+
+  ; Remove the key from pressed keys
+  downKeys.Delete(originalKey)
+}
+
+LogKey_Mouse(key) {
+  global LogArr, RelativeX, RelativeY
+  k := SubStr(key, 1, 1)
+
+  ;screen
+  CoordMode("Mouse", "Screen")
+  MouseGetPos(&X, &Y, &id)
+  Log((MouseMode == "window" || MouseMode == "relative" ? ";" : "") "MouseClick(`"" k "`", " X ", " Y ",,, `"D`") `;screen")
+
+  ;window
+  CoordMode("Mouse", "Window")
+  MouseGetPos(&WindowX, &WindowY, &id)
+  Log((MouseMode != "window" ? ";" : "") "MouseClick(`"" k "`", " WindowX ", " WindowY ",,, `"D`") `;window")
+
+  ;relative
+  CoordMode("Mouse", "Screen")
+  MouseGetPos(&tempRelativeX, &tempRelativeY, &id)
+  Log((MouseMode != "relative" ? ";" : "") "MouseClick(`"" k "`", " (tempRelativeX - RelativeX) ", " (tempRelativeY - RelativeY) ",,, `"D`", `"R`") `;relative")
+  RelativeX := tempRelativeX
+  RelativeY := tempRelativeY
+
+  ;get dif
+  CoordMode("Mouse", "Screen")
+  MouseGetPos(&X1, &Y1)
+  t1 := A_TickCount
+  Critical("Off")
+  ErrorLevel := !KeyWait(key)
+  Critical()
+  t2 := A_TickCount
+  if (t2 - t1 <= 200)
+    X2 := X1, Y2 := Y1
+  else
+    MouseGetPos(&X2, &Y2)
+
+  ;log screen
+  i := LogArr.Length - 2, r := LogArr[i]
+  if (InStr(r, ",,, `"D`")") && Abs(X2 - X1) + Abs(Y2 - Y1) < 5)
+    LogArr[i] := SubStr(r, 1, -16) ") `;screen", Log()
+  else
+    Log((MouseMode == "window" || MouseMode == "relative" ? ";" : "") "MouseClick(`"" k "`", " (X + X2 - X1) ", " (Y + Y2 - Y1) ",,, `"U`") `;screen")
+
+  ;log window
+  i := LogArr.Length - 1, r := LogArr[i]
+  if (InStr(r, ",,, `"D`")") && Abs(X2 - X1) + Abs(Y2 - Y1) < 5)
+    LogArr[i] := SubStr(r, 1, -16) ") `;window", Log()
+  else
+    Log((MouseMode != "window" ? ";" : "") "MouseClick(`"" k "`", " (WindowX + X2 - X1) ", " (WindowY + Y2 - Y1) ",,, `"U`") `;window")
+
+  ;log relative
+  i := LogArr.Length, r := LogArr[i]
+  if (InStr(r, ",,, `"D`", `"R`")") && Abs(X2 - X1) + Abs(Y2 - Y1) < 5)
+    LogArr[i] := SubStr(r, 1, -23) ",,,, `"R`") `;relative", Log()
+  else
+    Log((MouseMode != "relative" ? ";" : "") "MouseClick(`"" k "`", " (X2 - X1) ", " (Y2 - Y1) ",,, `"U`", `"R`") `;relative")
+}
+
+LogWindow() {
+  global oldid, LogArr, MouseMode
+  static oldtitle
+  id := WinExist("A")
+  if (!id)
+    return
+  title := WinGetTitle(id)
+  class := WinGetClass(id)
+  if (title = "" && class = "")
+    return
+  if (id = oldid && title = oldtitle)
+    return
+  oldid := id, oldtitle := title
+  title := SubStr(title, 1, 50)
+  title .= class ? " ahk_class " class : ""
+  title := RegExReplace(Trim(title), "[``%;]", "``$0")
+  CommentString := ""
+  if (MouseMode != "window")
+    CommentString := ";"
+  s := CommentString "tt := `"" title "`"`n" CommentString "WinWait(tt)" . "`n" CommentString "if (!WinActive(tt))`n" CommentString "  WinActivate(tt)"
+  i := LogArr.Length
+  r := i = 0 ? "" : LogArr[i]
+  if (InStr(r, "tt = ") = 1)
+    LogArr[i] := s, Log()
+  else
+    Log(s)
+}
+
+Log(str := "", Keyboard := false) {
+  global LogArr, RecordSleep
+  static LastTime := 0, KeyboardBuffer := ""
+  t := A_TickCount
+  Delay := (LastTime ? t - LastTime : 0)
+  LastTime := t
+  if (str = "")
+    return
+  i := LogArr.Length
+  r := i = 0 ? "" : LogArr[i]
+  
+  if (Keyboard) {
+    ; Special handling for modifier keys and key combinations
+    if (InStr(str, " Down}") || InStr(str, " Up}")) {
+      ; This is a modifier key event, handle it directly
+      if (Delay > 200) 
+        LogArr.Push((RecordSleep == "false" ? ";" : "") "Sleep(" (Delay // 2) ")")
+      LogArr.Push("Send(`"" . str . "`")")
+      return
+    }
+    
+    if (InStr(r, "Send") && Delay < 1000 && !InStr(r, " Down}") && !InStr(r, " Up}")) {
+      ; Continue normal keyboard sequence for regular keys
+      KeyboardBuffer .= str
+      ; Update the existing Send command with the complete buffer
+      LogArr[i] := "Send(`"{Blind}" . KeyboardBuffer . "`")"
+    } else {
+      ; Start a new keyboard buffer
+      KeyboardBuffer := str
+      ; Create a new Send command
+      if (Delay > 200) 
+        LogArr.Push((RecordSleep == "false" ? ";" : "") "Sleep(" (Delay // 2) ")")
+      LogArr.Push("Send(`"{Blind}" . KeyboardBuffer . "`")")
+    }
+    return
+  }
+
+  ; For non-keyboard actions, reset the keyboard buffer
+  KeyboardBuffer := ""
+  
+  if (Delay > 200) 
+    LogArr.Push((RecordSleep == "false" ? ";" : "") "Sleep(" (Delay // 2) ")")
+  LogArr.Push(str)
+}
+
