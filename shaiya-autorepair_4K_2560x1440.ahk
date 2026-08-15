@@ -22,9 +22,11 @@ CoordMode("Mouse", "Client") ; Screen, Client
 ; ===== 悬浮小窗 =====
 MyGui := Gui("+AlwaysOnTop +ToolWindow -Caption", "自动点击")
 MyGui.BackColor := "2E2E2E"
+MyGui.SetFont("s8", "Segoe UI")
+MyGui.Add("Text", "xm ym w80 h18 Center cAqua", "自动修理")
 MyGui.SetFont("s10 bold", "Segoe UI")
 
-StartStopBtn := MyGui.Add("Button", "xm ym w80 h30 cWhite", "▶ 启动")
+StartStopBtn := MyGui.Add("Button", "xm y+4 w80 h30 cWhite", "▶ 启动")
 StatusText := MyGui.Add("Text", "xm y+8 w80 h24 Center cRed", "● 已停止")
 MyGui.AddText("xm y+4 w80 h2 0x10")
 
@@ -32,7 +34,7 @@ StartStopBtn.OnEvent("Click", ToggleAutoClick)
 OnMessage(0x201, HandleLButtonDown)
 OnMessage(0x404, HandleTrayIconMessage)
 
-MyGui.Show("x100 y100 w105 h90 NoActivate")
+MyGui.Show("x100 y100 w105 h112 NoActivate")
 
 TrayTip("自动点击浮窗脚本", "点击托盘图标可显示/隐藏浮窗", 1)
 
@@ -79,27 +81,27 @@ ClickNextStep()
     {
         ; 打开背包界面
         case 0:
-            MouseClick("L", 1290, 90)
+            MouseClick("L", 2028, 138)
             clickStep := 1
             SetTimer(ClickNextStep, -clickGapMs)
         ; 选择修理
         case 1:
-            MouseClick("L", 770, 835)
+            MouseClick("L", 1200, 1325)
             clickStep := 2
             SetTimer(ClickNextStep, -clickGapMs)
         ; 点击修理
         case 2:
-            MouseClick("L", 1270, 815)
+            MouseClick("L", 2000, 1280)
             clickStep := 3
             SetTimer(ClickNextStep, -clickGapMs)
         ; 关闭修理窗口
         case 3:
-            MouseClick("L", 1490, 175)
+            MouseClick("L", 2332, 270)
             clickStep := 4
             SetTimer(ClickNextStep, -clickGapMs)
         ; 关闭背包界面
         case 4:
-            MouseClick("L", 1380, 195)
+            MouseClick("L", 2166, 305)
             clickStep := 0
             SetTimer(ClickNextStep, -roundIntervalMs)
     }

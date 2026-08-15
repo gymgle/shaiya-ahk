@@ -23,7 +23,7 @@ CoordMode("Mouse", "Client") ; Screen, Client
 MyGui := Gui("+AlwaysOnTop +ToolWindow -Caption", "自动点击")
 MyGui.BackColor := "2E2E2E"
 MyGui.SetFont("s8", "Segoe UI")
-MyGui.Add("Text", "xm ym w80 h18 Center cAqua", "自动售卖")
+MyGui.Add("Text", "xm ym w80 h18 Center cAqua", "自动修理")
 MyGui.SetFont("s10 bold", "Segoe UI")
 
 StartStopBtn := MyGui.Add("Button", "xm y+4 w80 h30 cWhite", "▶ 启动")
@@ -84,43 +84,23 @@ ClickNextStep()
             MouseClick("L", 1290, 90)
             clickStep := 1
             SetTimer(ClickNextStep, -clickGapMs)
-        ; 选择贩卖
+        ; 选择修理
         case 1:
-            MouseClick("L", 620, 835)
+            MouseClick("L", 770, 835)
             clickStep := 2
             SetTimer(ClickNextStep, -clickGapMs)
-        ; 点击最低等级
+        ; 点击修理
         case 2:
-            MouseClick("L", 410, 845)
+            MouseClick("L", 1270, 815)
             clickStep := 3
             SetTimer(ClickNextStep, -clickGapMs)
-        ; 点击低等级
+        ; 关闭修理窗口
         case 3:
-            MouseClick("L", 565, 845)
+            MouseClick("L", 1490, 175)
             clickStep := 4
             SetTimer(ClickNextStep, -clickGapMs)
-        ; 点击出售: 仅有可以出售的时候才点击
-        case 4:
-            MouseClick("L", 1324, 835)
-            MouseGetPos(&mx, &my)
-            pixelColor := PixelGetColor(mx, my, "RGB")
-            if IsColorNear(pixelColor, 0x656565, nearColorTolerance)
-                clickStep := 5
-            else
-                clickStep := 6
-            SetTimer(ClickNextStep, -clickGapMs)
-        ; 关闭贩卖窗口：如果没有可以卖出的东西
-        case 5:
-            MouseClick("L", 1555, 168)
-            clickStep := 7
-            SetTimer(ClickNextStep, -clickGapMs)
-        ; 点击确认卖出
-        case 6:
-            MouseClick("L", 820, 640)
-            clickStep := 7
-            SetTimer(ClickNextStep, -clickGapMs)
         ; 关闭背包界面
-        case 7:
+        case 4:
             MouseClick("L", 1380, 195)
             clickStep := 0
             SetTimer(ClickNextStep, -roundIntervalMs)
