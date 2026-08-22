@@ -2,6 +2,8 @@
 #SingleInstance Force
 Persistent
 
+; ===== For 2K - Mumu Android 1920x1080 280DPI =====
+
 ; ===== 点击参数 =====
 clickGapMs := 2000
 roundIntervalMs := 30 * 60 * 1000
@@ -73,6 +75,7 @@ ClickNextStep()
 
     if !IsTargetWindowActive(targetExe)
     {
+        MouseClick("L", 1200, 1050)
         SetTimer(ClickNextStep, -inactiveRetryMs)
         return
     }
@@ -122,6 +125,11 @@ ClickNextStep()
         ; 关闭背包界面
         case 7:
             MouseClick("L", 1380, 195)
+            clickStep := 8
+            SetTimer(ClickNextStep, -clickGapMs)
+        ; 最小化游戏窗口 (Win+D 显示桌面)
+        case 8:
+            Send("#d")
             clickStep := 0
             SetTimer(ClickNextStep, -roundIntervalMs)
     }
