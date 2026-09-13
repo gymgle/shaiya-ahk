@@ -26,6 +26,8 @@ MyGui.SetFont("s8", "Segoe UI")
 MyGui.Add("Text", "xm ym w80 h18 Center cAqua", "自动修理")
 MyGui.SetFont("s10 bold", "Segoe UI")
 
+MyGui.Add("Text", "xm y+4 w80 h16 Center cWhite", "周期(分钟)")
+IntervalEdit := MyGui.Add("Edit", "xm y+2 w80 h22 Center Number", "10")
 StartStopBtn := MyGui.Add("Button", "xm y+4 w80 h30 cWhite", "▶ 启动")
 StatusText := MyGui.Add("Text", "xm y+8 w80 h24 Center cRed", "● 已停止")
 MyGui.AddText("xm y+4 w80 h2 0x10")
@@ -34,7 +36,7 @@ StartStopBtn.OnEvent("Click", ToggleAutoClick)
 OnMessage(0x201, HandleLButtonDown)
 OnMessage(0x404, HandleTrayIconMessage)
 
-MyGui.Show("x100 y100 w105 h112 NoActivate")
+MyGui.Show("x100 y100 w105 h145 NoActivate")
 
 TrayTip("自动点击浮窗脚本", "点击托盘图标可显示/隐藏浮窗", 1)
 
@@ -46,6 +48,10 @@ OnExit(Cleanup)
 ToggleAutoClick(*)
 {
     global isRunning, clickStep, StatusText, StartStopBtn
+
+    if !isRunning && !ApplyRoundInterval()
+        return
+
     isRunning := !isRunning
 
     if isRunning
@@ -63,6 +69,22 @@ ToggleAutoClick(*)
         StatusText.Text := "● 已停止"
         StatusText.Opt("cRed")
     }
+}
+
+ApplyRoundInterval()
+{
+    global IntervalEdit, roundIntervalMs
+    intervalMinutes := Trim(IntervalEdit.Value)
+
+    if !RegExMatch(intervalMinutes, "^\d+$") || intervalMinutes < 1 || intervalMinutes > 1440
+    {
+        MsgBox("周期必须是 1 到 1440 之间的整数分钟。", "输入无效", "Icon!")
+        IntervalEdit.Focus()
+        return false
+    }
+
+    roundIntervalMs := intervalMinutes * 60 * 1000
+    return true
 }
 
 ClickNextStep()
